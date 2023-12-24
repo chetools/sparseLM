@@ -77,7 +77,7 @@ def LM(f, x0, L=1000, rho_tol = 0.1, maxiter=1000, xtol=1e-12, ftol=1e-12):
         for i in range(maxiter):
             Ljj = L*jj.diagonal()
             h = pypardiso.spsolve(jj + sp.sparse.diags(Ljj,format='csr'), -jTf)
-            if np.max(np.abs(h/x))<xtol or np.max(np.abs(f1))<ftol:
+            if np.max(np.abs(h)/(np.abs(x)+1e-12))<xtol or np.max(np.abs(f1))<ftol:
                 res=solNT(success=True, x=x, f=f1, niter=i)
                 return res
 
