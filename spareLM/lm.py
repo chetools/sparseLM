@@ -10,7 +10,7 @@ jnp.set_printoptions(precision=2,linewidth=120)
 np.set_printoptions(precision=2,linewidth=120)
 
 
-solNT = namedtuple('solNT', 'success niter f x')
+solNT = namedtuple('solNT', 'success niter L f x')
 
 def get_combos(mat):
     mat=sp.sparse.csr_array(mat)
@@ -49,8 +49,12 @@ def get_combos(mat):
         ls.append(ls1)
     return ls, vecs, rows, cols
 
+def LM_print(res):
+    print(f'Iteration: {res.niter}  L: {res.L:0.2e}')
+    print(f'f abs mean: {np.mean(np.abs(res.f)):0.2e}  max: {np.max(np.abs(res.f)):0.2e}')
 
-def LM(f, x0, L=1000, rho_tol = 0.1, maxiter=1000, xtol=1e-12, ftol=1e-12):
+
+def LM(f, x0, L=1000, rho_tol = 0.1, maxiter=1000, xtol=1e-12, ftol=1e-12, printfunc=LM_print, iter_print=int(1e9)):
     expected = jax.jit(jax.jacobian(f))(x0)
     ls, vecs,rows,cols= get_combos(expected)
     
@@ -71,14 +75,21 @@ def LM(f, x0, L=1000, rho_tol = 0.1, maxiter=1000, xtol=1e-12, ftol=1e-12):
         x=x0
         f1 = f(x)
         j = jac(x).tocsr()
+        print(f'Levenberg-Marquadrt Jacobian shape: {j.shape}')
         jj = (j.T @ j)
         jTf = j.T @ f(x)
         
         for i in range(maxiter):
             Ljj = L*jj.diagonal()
             h = pypardiso.spsolve(jj + sp.sparse.diags(Ljj,format='csr'), -jTf)
-            if np.max(np.abs(h)/(np.abs(x)+1e-12))<xtol or np.max(np.abs(f1))<ftol:
-                res=solNT(success=True, x=x, f=f1, niter=i)
+        
+            if i%iter_print == 0 and i > 0:
+                res=solNT(success=False, x=x, f=f1, niter=i, L=L)
+                printfunc(res)    
+            if np.max(np.abs(h)/(np.abs(x)+1e-15))<xtol or np.max(np.abs(f1))<ftol:
+                res=solNT(success=True, x=x, L=L, f=f1, niter=i)
+                if iter_print < 1e9:
+                    printfunc(res) 
                 return res
 
             f2 = f(x+h)
@@ -89,11 +100,13 @@ def LM(f, x0, L=1000, rho_tol = 0.1, maxiter=1000, xtol=1e-12, ftol=1e-12):
                 j = jac(x).tocsr()
                 jj = (j.T @ j)
                 jTf = j.T @ f(x)
-                L = max(L/9, 1e-7)
+                L = max(L/9, 1e-12)
             else:
-                L = min(L*11, 1e7)        
+                L = min(L*11, 1e7)
+            
+   
 
-        res=solNT(success=False, x=x, f=f1, niter=i)
+        res=solNT(success=False, x=x, f=f1, niter=i, L=L)
         return res
 
     res=solve()
