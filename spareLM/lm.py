@@ -21,43 +21,44 @@ def get_combos(mat):
     cols=[]
     rows=[]
     vecs=[]
-    ls=[]
     while cand:
         vec = np.zeros(N)
         k = cand.pop()
         cand2 = deepcopy(cand)
-        v=set(c.indices[c.indptr[k]:c.indptr[k+1]])
-        matcols = mat.indices[mat.indptr[k]:mat.indptr[k+1]]
-        col1=[matcols]
-        row1=[np.full_like(matcols,k)]
-        ls1=[k]
+        v=set(c.indices[c.indptr[k]:c.indptr[k+1]])  #rows that have common non-zero columns with row k
+        matcols = mat.indices[mat.indptr[k]:mat.indptr[k+1]]   #non-zero columns of row k
+        col1=[matcols]  #indices of non-zero columns to be concatenated via cols into a 1D array for COO
+        row1=[np.full_like(matcols,k)]  #index of row k repeated as many times as non-zero columns for COO
+        ls1=[k]  # eventually this will be a list of rows with non-common non-zero columns that can be combined
         while True:
-            cand2-=v
+            cand2-=v  #remove rows with common non-zero columns from candidate rows to be combined with row k
             if not(cand2):
-                break
-            first=cand2.pop()
-            v = set(c.indices[c.indptr[first]:c.indptr[first+1]])
-            ls1.append(first)
-            matcols=mat.indices[mat.indptr[first]:mat.indptr[first+1]]
+                break  #no more candidate rows to check
+            k2=cand2.pop()  #take a row k2 from candidates to combine with row k
+            v = set(c.indices[c.indptr[k2]:c.indptr[k2+1]]) # find it's non-zero columns
+            ls1.append(k2)  
+            matcols=mat.indices[mat.indptr[k2]:mat.indptr[k2+1]]
             col1.append(matcols)
-            row1.append(np.full_like(matcols,first))
-            cand.remove(first)
+            row1.append(np.full_like(matcols,k2))
+            cand.remove(k2)
         vec[ls1]=1.
         vecs.append(vec)
         cols.append(np.concatenate(col1))
         rows.append(np.concatenate(row1))
-        ls.append(ls1)
-    return ls, vecs, rows, cols
+    return vecs, rows, cols
+
+
 
 def LM_print(res):
     print(f'Iteration: {res.niter}  L: {res.L:0.2e}')
     print(f'f abs mean: {np.mean(np.abs(res.f)):0.2e}  max: {np.max(np.abs(res.f)):0.2e}')
 
 
-def LM(f, x0, L=1000, rho_tol = 0.1, maxiter=1000, xtol=1e-12, ftol=1e-12, printfunc=LM_print, iter_print=int(1e9)):
-    expected = jax.jit(jax.jacobian(f))(x0)
-    ls, vecs,rows,cols= get_combos(expected)
-    
+def LM(f, x0):
+    expected = jax.jacobian(f)(x0)
+    vecs,rows,cols= get_combos(expected)
+    data_rows = np.concatenate(rows)
+    data_cols=np.concatenate(cols)
 
     def jac(x):
         _, vjp = jax.vjp(f, x)
@@ -66,11 +67,12 @@ def LM(f, x0, L=1000, rho_tol = 0.1, maxiter=1000, xtol=1e-12, ftol=1e-12, print
             data.append(vjp(vec)[0][col])
 
         data = np.concatenate(data)
-        data_rows = np.concatenate(rows)
-        data_cols=np.concatenate(cols)
         return sp.sparse.coo_matrix((data,(data_rows, data_cols)))
+    
+    
+    
 
-    def solve(x0=x0,L=L):
+    def solve(x0=x0,L=1000, rho_tol = 0.1, maxiter=1000, xtol=1e-12, ftol=1e-12, printfunc=LM_print, iter_print=int(1e9)):
 
         x=x0
         f1 = f(x)
@@ -82,10 +84,9 @@ def LM(f, x0, L=1000, rho_tol = 0.1, maxiter=1000, xtol=1e-12, ftol=1e-12, print
         for i in range(maxiter):
             Ljj = L*jj.diagonal()
             h = pypardiso.spsolve(jj + sp.sparse.diags(Ljj,format='csr'), -jTf)
-        
             if i%iter_print == 0 and i > 0:
                 res=solNT(success=False, x=x, f=f1, niter=i, L=L)
-                printfunc(res)    
+                printfunc(res)   
             if np.max(np.abs(h)/(np.abs(x)+1e-15))<xtol or np.max(np.abs(f1))<ftol:
                 res=solNT(success=True, x=x, L=L, f=f1, niter=i)
                 if iter_print < 1e9:
@@ -109,8 +110,7 @@ def LM(f, x0, L=1000, rho_tol = 0.1, maxiter=1000, xtol=1e-12, ftol=1e-12, print
         res=solNT(success=False, x=x, f=f1, niter=i, L=L)
         return res
 
-    res=solve()
-    return res
+    return solve
      
 
      
